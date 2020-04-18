@@ -13,7 +13,7 @@ function Player(userID, name){
     this.role = null;
     this.team = null;
     this.vote = null;
-    this.votes = null;
+    this.votes = 0;
     this.hasBeenLeprechaun = false;
 };
 var room1 = new Room(null);
@@ -49,10 +49,10 @@ To clear the player list:
 "!clear"
 
 To share cards between you and another player:
-"!cardshare, player1, player2"
+"!cards, playerToShareWith"
 
-To share colora between you and another player:
-"!colorshare, player1, player2"
+To share color between you and another player:
+"!colors, playerToShareWith"
 
 To show just your card to another player:
 "!showcard, thePersonYouAreShowingYourCard"
@@ -70,7 +70,7 @@ To publicly reveal your color:
 "!publiccolorreveal"
 
 To nominate someone to a leaderless room:
-"!nominate, nameOfNomination"
+"!nom, nameOfNominatedPlayer"
 
 To vote for someone else to be the leader of the rooms. (Must have majority to usurp current leader):
 "!vote, candidate"
@@ -222,46 +222,51 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     if(playerList.length > 10 ){
                         roundTimers = [5, 4, 3, 2, 1];
                     }
-                    max = playerList.length;
-                    for(var j = 0; j < playerList.length; j++){
-                        if((Math.random() < 0.5 && room1.members.size < Math.ceil(max / 2.0)) || room2.members.size > Math.ceil(max / 2.0)){
-                            sendToChannel(room1.roomID, playerList[j].userID);
-                            room1.members.add(playerList[j].userID);
+                    if(playerList.length >= roleList.length){
+                        max = playerList.length;
+                        for(var j = 0; j < playerList.length; j++){
+                            if((Math.random() < 0.5 && room1.members.size < Math.ceil(max / 2.0)) || room2.members.size == Math.ceil(max / 2.0)){
+                                sendToChannel(room1.roomID, playerList[j].userID);
+                                room1.members.add(playerList[j].userID);
+                            }
+                            else{
+                                sendToChannel(room2.roomID, playerList[j].userID)
+                                room2.members.add(playerList[j].userID);
+                            }
                         }
-                        else{
-                            sendToChannel(room2.roomID, playerList[j].userID)
-                            room2.members.add(playerList[j].userID);
+                        it = roundTimers.values()
+                        startRound(channelID);
+                        playerList.sort(() => Math.random() - 0.5)
+                        roleList.sort(() => Math.random() - 0.5)
+                        for(var i=0; i < max; i++){
+                            playerList[i].role = roleList[0].role;
+                            playerList[i].team = roleList[0].color;
+                            playerList[i].desc = roleList[0].desc;
+                            if(playerList[i].role == 'Leprechaun'){
+                                playerList[i].hasBeenLeprechaun = true;
+                            }
+                            sendMessage(playerList[i].userID, stringColor(playerList[i].team,'**'+playerList[i].role+'**') + playerList[i].desc + '\n');
+                            roleList.shift();
                         }
+                        active = true;
                     }
-                    it = roundTimers.values()
-                    startRound(channelID);
-                    playerList.sort(() => Math.random() - 0.5)
-                    roleList.sort(() => Math.random() - 0.5)
-                    for(var i=0; i < max; i++){
-                        playerList[i].role = roleList[0].role;
-                        playerList[i].team = roleList[0].color;
-                        playerList[i].desc = roleList[0].desc;
-                        if(playerList[i].role == 'Leprechaun'){
-                            playerList[i].hasBeenLeprechaun = true;
-                        }
-                        sendMessage(playerList[i].userID, stringColor(playerList[i].team,'**'+playerList[i].role+'**') + playerList[i].desc + '\n');
-                        roleList.shift();
+                    else{
+                        sendMessage(channelID, 'Not enough roles');
                     }
-                    active = true;
                 }
             break;
-            //!colorshare
-            case 'colorshare':
+            //!colors
+            case 'colors':
                 if(args.length == 2){
-                    fp = returnIndexOfPlayer(args[0]);
-                    sp = returnIndexOfPlayer(args[1]);
+                    fp = returnIndexOfPlayer(userID);
+                    sp = returnIndexOfPlayer(args[0]);
                     if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
-                        if(playerList[fp].role.includes('HotPotato') || playerList[sp].role.includes('HotPotato') || (playerList[fp].role.includes('Leprechaun') && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes('Leprechaun') && !playerList[fp].hasBeenLeprechaun)){
-                            cardSwap(playerList[fp], playerList[sp], channelID)
+                        if((playerList[fp].role.includes('HotPotato') || playerList[sp].role.includes('HotPotato')) && ((playerList[fp].role.includes('Leprechaun') && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes('Leprechaun') && !playerList[fp].hasBeenLeprechaun))){
+                            cardSwap(playerList[fp], playerList[sp])
                         }
                         else{
-                            colorShare(playerList[fp], playerList[sp], false);
-                            colorShare(playerList[sp], playerList[fp], false);
+                            colors(playerList[fp], playerList[sp], false);
+                            colors(playerList[sp], playerList[fp], false);
                         } 
                     }
                     else{
@@ -272,18 +277,18 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     sendMessage(channelID, "Improper number of arguments for color sharing.");
                 }
             break;
-            //!cardshare
-            case 'cardshare':
-                    if(args.length == 2){
-                        fp = returnIndexOfPlayer(args[0]);
-                        sp = returnIndexOfPlayer(args[1]);
+            //!cards
+            case 'cards':
+                    if(args.length == 1){
+                        fp = returnIndexOfPlayer(userID);
+                        sp = returnIndexOfPlayer(args[0]);
                         if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
                             if(playerList[fp].role.includes('HotPotato') || playerList[sp].role.includes('HotPotato') || (playerList[fp].role.includes('Leprechaun') && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes('Leprechaun') && !playerList[fp].hasBeenLeprechaun)){
-                                cardSwap(playerList[fp], playerList[sp], channelID)
+                                cardSwap(playerList[fp], playerList[sp])
                             }
                             else{
-                                cardShare(playerList[fp], playerList[sp], false);
-                                cardShare(playerList[sp], playerList[fp], false);
+                                cards(playerList[fp], playerList[sp], false);
+                                cards(playerList[sp], playerList[fp], false);
                             }
                         }
                         else{
@@ -300,7 +305,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     fp = returnIndexOfPlayer(userID);
                     sp = returnIndexOfPlayer(args[0]);
                     if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
-                        colorShare(playerList[fp], playerList[sp], false);
+                        colors(playerList[fp], playerList[sp], false);
                     }
                     else{
                         sendMessage(channelID, "One or more of those players is not in the room.");
@@ -316,7 +321,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                         fp = returnIndexOfPlayer(userID);
                         sp = returnIndexOfPlayer(args[0]);
                         if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
-                            cardShare(playerList[fp], playerList[sp], false);
+                            cards(playerList[fp], playerList[sp], false);
                         }
                         else{
                             sendMessage(channelID, "One or more of those players is not in the room.");
@@ -359,8 +364,8 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     }
                 }
             break;
-            //!nominate
-            case 'nominate':
+            //!nom
+            case 'nom':
                 if(!betweenRounds){
                     let ind = null;
                     let leaderID = '';
@@ -371,7 +376,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                         }
                     }
                     let isValid = true;
-                    if(room1.members.has(userID) && room1.members.has(leaderID)){
+                    if(room1.members.has(userID) && room1.members.has(leaderID) && userID != leaderID && ind != null){
                         if(room1.leaderID != null){
                             isValid = false;
                         }
@@ -379,62 +384,77 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                             room1.leaderID = leaderID;
                         }
                     }
-                    else{
-                        if(room2.members.has(userID) && room2.members.has(leaderID)){
-                            if(room1.leaderID != null){
-                                isValid = false;
-                            }
-                            else{
-                                room2.leaderID = leaderID;
-                            }
+                    else if(room2.members.has(userID) && room2.members.has(leaderID) && userID != leaderID && ind != null){
+                        if(room1.leaderID != null){
+                            isValid = false;
+                        }
+                        else{
+                            room2.leaderID = leaderID;
                         }
                     }
+                    else{
+                        isValid = false;
+                    }
+
                     let message = "Invalid Nomination";
-                    if(isValid){
+                    if(isValid && ind != null){
                         message = playerList[ind].playerName + " is now room leader!"
                     }
                     sendMessage(channelID, message);
                 }
+                else{
+                    sendMessage(channelID, 'That can\'t be done between rounds!');
+                }
+
             break;
 
             //!vote
             case 'vote':
-                if(!betweenRounds){
-                    ind = null;
-                    let prevVote = null;
-                    for(var i = 0; i < playerList.length; i++){
-                        if(playerList[i].vote == playerList[returnIndexOfPlayer(userID)].name){
-                            ind = i;
-                            prevVote = playerList[i].vote;
-                            playerList[i].vote = args[0];
+                if(!betweenRounds || !active){
+                    if(args.length == 1){
+                        ind = null;
+                        let voter = null;
+                        let result = ''
+                        g = returnIndexOfPlayer(args[0]);
+                        if(g != -1){
+                            cand = playerList[g];
+                            voter = playerList[returnIndexOfPlayer(userID)];
+                        }
+                        else{
+                            sendMessage(channelID, "That is not a player in the game");
+                            return;
+                        }
+                        if(inSameRoom(cand.userID, voter.userID)){
+                            if(voter.vote != null){
+                                playerList[returnIndexOfPlayer(voter.vote)].votes--;
+                                console.log(voter.vote + ' lost a vote!');
+                            }
+                            voter.vote = cand.playerName;
+                            cand.votes++;
+                            result = cand.playerName + ' is now room leader!';
+                            console.log(cand.playerName + ' gained a vote')
+                            if(room1.members.has(cand.userID) && cand.votes > room1.members.size / 2){
+                                room1.leaderID = cand.userID;
+                            }
+                            else if (room2.members.has(cand.userID) && cand.votes > room2.members.size / 2){
+                                room2.leaderID = cand.userID;
+                            }
+                            else{
+                                result = cand.playerName + ' now has ' + cand.votes + ' votes!';
+                            }
+                            sendMessage(channelID, result);
+                        } 
+                        else{
+                            sendMessage(channelID, 'Voting for players in the other room is not allowed.');
                         }
                     }
-                    for(var i = 0; i < playerList.length; i++){
-                        if(playerList[i].playerName == prevVote){
-                            playerList[i].votes--;
-                        }
-                        if(playerList[i].playerName == args[0]){
-                            playerList[i].votes++;
-                            if(room1.members.has(playerList[i].userID)){
-                                if(playerList[i].votes > (room1.members.size/2)){
-                                    room1.leaderID = playerList[i].userID;
-                                    sendMessage(channelID, playerList[i].playerName + " is now room leader!");
-                                }
-                                else{
-                                    sendMessage(channelID, playerList[i].playerName + " has " + playerList[i].votes + " votes!");
-                                }
-                            }
-                            else if(room2.members.has(playerList[i].userID)){
-                                if(playerList[i].votes > (room2.members.size/2)){
-                                    room2.leaderID = playerList[i].userID;
-                                    sendMessage(channelID, playerList[i].playerName + " is now room leader!");
-                                }
-                                else{
-                                    sendMessage(channelID, playerList[i].playerName + " has " + playerList[i].votes + " votes!");
-                                }
-                            }
-                        }
+                    else{
+                        sendMessage(channelID, 'Wrong number of arguments for voting.');
                     }
+
+                }
+                else{
+                    sendMessage(channelID, 'That can only be done during rounds');
                 }
             break;
 
@@ -502,8 +522,8 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
             break;
             //!join
             case 'join':
-                if(active){
-                    if(!isSet){
+                if(!active){
+                    if(isSet){
                         if(bot.channels[channelID] != undefined){
                             sendToChannel(meetingRoom.roomID, userID);
                             var newPlayer = new Player(userID, (bot.servers[bot.channels[channelID].guild_id].members[userID].nick != null ? bot.servers[bot.channels[channelID].guild_id].members[userID].nick : user));
@@ -545,7 +565,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
      }
 });
 
-function colorShare(sender, receiver, forced){
+function colors(sender, receiver, forced){
     if(!sender.role.includes("ShyGuy") && !receiver.role.includes("ShyGuy") || forced){
         sendMessage(receiver.userID, sender.playerName + ' is ' + stringColor(sender.team, sender.team));
     }
@@ -554,7 +574,7 @@ function colorShare(sender, receiver, forced){
     }
 }
 
-function cardShare(sender, receiver, forced){
+function cards(sender, receiver, forced){
     if(!sender.role.includes("ShyGuy") && !sender.role.includes('Coy') && !receiver.role.includes("ShyGuy") && !receiver.role.includes("Coy") || forced){
     sendMessage(receiver.userID, sender.playerName + ' is ' + stringColor(sender.team, sender.role));
     }
@@ -585,7 +605,7 @@ function stringColor(team, message){
     }
 }
 
-function cardSwap(player1, player2, channelID){
+function cardSwap(player1, player2){
     let temp = {role: player1.role, team: player1.team, desc: player1.desc}
     if(player1.role == 'Leprechaun' || player2.role == 'Leprechaun'){
         player1.hasBeenLeprechaun = true;
@@ -604,19 +624,23 @@ function cardSwap(player1, player2, channelID){
 
 function startRound(channelID){
     x = it.next();
+    q = 15000;
     if(x.value == undefined){
-        endGame(channelID)
+        sendMessage(channelID, "If you are the Gambler, Sniper, or Private Eye, please make your guess now. You have 10 seconds. Not guessing results in a loss");
+        setTimeout(endGame, 10000, channelID);
     }
     else{
         sendMessage(channelID, "This round will be " + x.value + " minutes long.");
-        setTimeout(endRound, x.value * 5000, channelID);
+        setTimeout(function(){ if(active){bot.sendMessage({to:channelID, message: '1 minute left in the round', tts: true})}}, (x.value - 1)  *  q);
+        setTimeout(function(){ if(active){bot.sendMessage({to:channelID, message: '30 seconds left in the round', tts: true})}}, (x.value - 0.5)  * q);
+        setTimeout(endRound, x.value * q, channelID);
     }
 }
 
 function endRound(channelID){
     sendMessage(channelID, "This round is over ");
-    sendToChannel(meetingRoom.roomID, room2.leaderID);
-    sendToChannel(meetingRoom.roomID, room1.leaderID);
+    sendToChannel(meetingRoom.roomID, (room2.leaderID != null ? room2.leaderID : (Array.from(room2.members))[0]));
+    sendToChannel(meetingRoom.roomID, (room1.leaderID != null ? room1.leaderID : (Array.from(room1.members))[0]));
     for(var l = 0; l < playerList.length; l++){
         playerList[l].votes = 0;
         playerList[l].prevVote = null;
@@ -625,9 +649,11 @@ function endRound(channelID){
 }
 
 function returnIndexOfPlayer(id){
-    for(var j = 0; j < playerList.length; j++){
-        if(playerList[j].playerName == id || playerList[j].userID == id){
-            return j;
+    if(id != null){
+        for(var j = 0; j < playerList.length; j++){
+            if(playerList[j].playerName == id || playerList[j].userID == id){
+                return j;
+            }
         }
     }
     return -1;
@@ -661,23 +687,32 @@ function sendMessage(dest, message){
 
 function endGame(channelID){
     if(bot.channels[channelID] != undefined){
-        message = 'Room 1:\n';
-        message = String.prototype.concat(message, RoomRoles(room1));
-        message = String.prototype.concat(message, '\nRoom 2:\n');
-        message = String.prototype.concat(message, RoomRoles(room2));
-        message = String.prototype.concat(message, '\nBuried Card(s):\n');
-        if(roleList.length > 0){
-            for(var i=0; i < roleList.length; i++){
-                message = String.prototype.concat(message, stringColor(roleList[i].color, roleList[i].role));
+        if(active){
+            message = 'Room 1:\n';
+            message = String.prototype.concat(message, RoomRoles(room1));
+            message = String.prototype.concat(message, '\nRoom 2:\n');
+            message = String.prototype.concat(message, RoomRoles(room2));
+            message = String.prototype.concat(message, '\nBuried Card(s):\n');
+            if(roleList.length > 0){
+                for(var i=0; i < roleList.length; i++){
+                    message = String.prototype.concat(message, stringColor(roleList[i].color, roleList[i].role));
+                }
+            }
+            sendMessage(channelID, message);
+            roleList = [];
+            room1.members = new Set();
+            room1.leaderID = null;
+            room2.members = new Set();
+            room2.leaderID = null;
+            active = false;
+            betweenRounds = false;
+            for(let o = 0; o < playerList.length; o++){
+                sendToChannel(meetingRoom.roomID, playerList[o].userID);
             }
         }
-        sendMessage(channelID, message);
-        roleList = [];
-        room1.members = new Set();
-        room1.leaderID = null;
-        room2.members = new Set();
-        room2.leaderID = null;
-        active = false;
+        else{
+            sendMessage(channelID,"No active game");
+        }
     }
     else{
         sendMessage(channelID,"That message belongs in the public text channel.");
