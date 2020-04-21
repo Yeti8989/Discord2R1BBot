@@ -2,6 +2,8 @@ var Discord = require('discord.io');
 var logger = require('winston');
 var auth = require('./auth.json');
 var playerList = [];
+var pause = false;
+var roundCt = 0;
 function Room(roomID){
     this.members = new Set();
     this.roomID = roomID;
@@ -64,10 +66,10 @@ To clear the player list:
 "!clear"
 
 To publicly reveal your card:
-"!publiccardreveal"
+"!pubcard"
 
 To publicly reveal your color: 
-"!publiccolorreveal"
+"!pubcolor"
 
 To nominate someone to a leaderless room:
 "!nom, nameOfNominatedPlayer"
@@ -103,6 +105,14 @@ var roleMap = new Map(
     desc: 'You are a member of the ' + stringColor('BLUE', 'BLUE') + ' team, you win if the president does not gain the \'dead\' condition at the end of the game. You are also Coy, which means you cannot card share unless forced. You can still color share',
     team: 'BLUE'
 }],
+ ['RedShy', {
+    desc: 'You are a member of the ' + stringColor('RED', 'RED') + 'team, you win if the president gains the \'dead\' condition at the end of the game. You are also Shy, which means you cannot card or color share unless forced.',
+    team: 'RED'
+}],
+ ['BlueShy', {
+    desc: 'You are a member of the ' + stringColor('BLUE', 'BLUE') + ' team, you win if the president does not gain the \'dead\' condition at the end of the game. You are also Shy, which means you cannot card or color share unless forced.',
+    team: 'BLUE'
+}],
  ['RedSpy', {
     desc: 'You are a member of the ' + stringColor('RED', 'RED') + ' team, you win if the president gains the \'dead\' condition at the end of the game. During a color share, you will be shown to be on the ' + stringColor('BLUE', 'BLUE') + ' team',
     team: 'BLUE'
@@ -131,6 +141,7 @@ let sp = -1;
 let it = null;
 var server = null;
 var channels = null;
+var roundTimers = null;
 // Configure logger settings
 logger.remove(logger.transports.Console);
 logger.add(new logger.transports.Console, {
@@ -154,9 +165,9 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
 
     if (message.substring(0, 1) == '!') {
         var args = message.substring(1).split(', ');
-        var cmd = args[0];
+        var cmd = args[0].toLocaleLowerCase();
         args = args.splice(1);
-        switch(cmd) {
+        switch(cmd.toLocaleLowerCase()) {
             // !help
             case 'help':
                 sendMessage(channelID, helpString);
@@ -203,7 +214,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
             case 'play':
                 if(isSet && !active){
                     roleList = [];
-                    var roundTimers = [3, 2, 1];
+                    roundTimers = [4, 3, 2];
                     for(var j = 0; j < args.length; j++){
                         if(roleMap.get(args[j]) != undefined){
                             roleList.push(
@@ -222,7 +233,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     if(playerList.length > 10 ){
                         roundTimers = [5, 4, 3, 2, 1];
                     }
-                    if(playerList.length >= roleList.length){
+                    if(playerList.length <= roleList.length){
                         max = playerList.length;
                         for(var j = 0; j < playerList.length; j++){
                             if((Math.random() < 0.5 && room1.members.size < Math.ceil(max / 2.0)) || room2.members.size == Math.ceil(max / 2.0)){
@@ -245,6 +256,9 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                             if(playerList[i].role == 'Leprechaun'){
                                 playerList[i].hasBeenLeprechaun = true;
                             }
+                            if(playerList[i].role == 'Gambler' || playerList[i].role == 'Sniper' || playerList[i].role == 'PrivateEye'){
+                                pause = true;
+                            }
                             sendMessage(playerList[i].userID, stringColor(playerList[i].team,'**'+playerList[i].role+'**') + playerList[i].desc + '\n');
                             roleList.shift();
                         }
@@ -257,17 +271,21 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
             break;
             //!colors
             case 'colors':
-                if(args.length == 2){
+                if(args.length == 1){
                     fp = returnIndexOfPlayer(userID);
-                    sp = returnIndexOfPlayer(args[0]);
+                    sp = returnIndexOfPlayer(args[0].toLocaleLowerCase());
                     if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
-                        if((playerList[fp].role.includes('HotPotato') || playerList[sp].role.includes('HotPotato')) && ((playerList[fp].role.includes('Leprechaun') && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes('Leprechaun') && !playerList[fp].hasBeenLeprechaun))){
+                        if((playerList[fp].role.includes("Leprechaun") && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes("Leprechaun") && !playerList[fp].hasBeenLeprechaun) || (!playerList[fp].role.includes("Leprechaun") && !playerList[sp].role.includes("Leprechaun") && (playerList[fp].role.include("HotPotato") || playerList[sp].role.include("HotPotato")))){
                             cardSwap(playerList[fp], playerList[sp])
                         }
-                        else{
+                        else if(!playerList[fp].role.includes("Shy") && !playerList[sp].role.includes("Shy")){
                             colors(playerList[fp], playerList[sp], false);
                             colors(playerList[sp], playerList[fp], false);
                         } 
+                        else{
+                            sendMessage(playerList[fp].userID, "This action cannot be performed for one or more reasons");
+                            sendMessage(playerList[sp].userID, "This action cannot be performed for one or more reasons");
+                        }
                     }
                     else{
                         sendMessage(channelID, "One or more of those players is not in the room.");
@@ -279,31 +297,35 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
             break;
             //!cards
             case 'cards':
-                    if(args.length == 1){
-                        fp = returnIndexOfPlayer(userID);
-                        sp = returnIndexOfPlayer(args[0]);
-                        if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
-                            if(playerList[fp].role.includes('HotPotato') || playerList[sp].role.includes('HotPotato') || (playerList[fp].role.includes('Leprechaun') && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes('Leprechaun') && !playerList[fp].hasBeenLeprechaun)){
-                                cardSwap(playerList[fp], playerList[sp])
-                            }
-                            else{
-                                cards(playerList[fp], playerList[sp], false);
-                                cards(playerList[sp], playerList[fp], false);
-                            }
+                if(args.length == 1){
+                    fp = returnIndexOfPlayer(userID);
+                    sp = returnIndexOfPlayer(args[0].toLocaleLowerCase());
+                    if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
+                        if((playerList[fp].role.includes("Leprechaun") && !playerList[sp].hasBeenLeprechaun) || (playerList[sp].role.includes("Leprechaun") && !playerList[fp].hasBeenLeprechaun) || (!playerList[fp].role.includes("Leprechaun") && !playerList[sp].role.includes("Leprechaun") && (playerList[fp].role.include("HotPotato") || playerList[sp].role.include("HotPotato")))){
+                            cardSwap(playerList[fp], playerList[sp])
+                        }
+                        else if(!playerList[fp].role.includes("Shy") && !playerList[fp].role.includes('Coy') && !playerList[sp].role.includes("Shy") && !playerList[sp].role.includes("Coy")){
+                            cards(playerList[fp], playerList[sp], false);
+                            cards(playerList[sp], playerList[fp], false);
                         }
                         else{
-                            sendMessage(channelID, "One or more of those players is not in the room.");
+                            sendMessage(playerList[fp].userID, "This action cannot be performed for one or more reasons");
+                            sendMessage(playerList[sp].userID, "This action cannot be performed for one or more reasons");
                         }
                     }
                     else{
-                        sendMessage(channelID, "Improper number of arguments for color sharing.");
+                        sendMessage(channelID, "One or more of those players is not in the room.");
                     }
-                break;
-            //!colorshow
-            case 'colorshow':
+                }
+                else{
+                    sendMessage(channelID, "Improper number of arguments for color sharing.");
+                }
+            break;
+            //!showcolor
+            case 'showcolor':
                 if(args.length == 1){
                     fp = returnIndexOfPlayer(userID);
-                    sp = returnIndexOfPlayer(args[0]);
+                    sp = returnIndexOfPlayer(args[0].toLocaleLowerCase());
                     if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
                         colors(playerList[fp], playerList[sp], false);
                     }
@@ -315,11 +337,11 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     sendMessage(channelID, "Improper number of arguments for color showing.");
                 }
             break;
-            //!cardshow
-            case 'cardshow':
+            //!showcard
+            case 'showcard':
                     if(args.length == 1){
                         fp = returnIndexOfPlayer(userID);
-                        sp = returnIndexOfPlayer(args[0]);
+                        sp = returnIndexOfPlayer(args[0].toLocaleLowerCase());
                         if(fp != -1 && sp != -1 && inSameRoom(playerList[fp].userID, playerList[sp].userID)){
                             cards(playerList[fp], playerList[sp], false);
                         }
@@ -331,7 +353,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                         sendMessage(channelID, "Improper number of arguments for card showing.");
                     }
             //!cardreveal
-            case 'publiccardreveal':
+            case 'pubcard':
                 if(!betweenRounds){
                     fp = returnIndexOfPlayer(userID);
                     if(fp != -1){
@@ -348,7 +370,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                 }
             break;
             //!colorreveal
-            case 'publiccolorreveal':
+            case 'pubcolor':
                 if(!betweenRounds){
                     fp = returnIndexOfPlayer(userID);
                     if(fp != -1){
@@ -370,7 +392,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     let ind = null;
                     let leaderID = '';
                     for(var i = 0; i < playerList.length; i++){
-                        if(args[0] == playerList[i].playerName){
+                        if(args[0].toLocaleLowerCase() == playerList[i].playerName){
                             ind = i;
                             leaderID = playerList[i].userID;
                         }
@@ -415,7 +437,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                         ind = null;
                         let voter = null;
                         let result = ''
-                        g = returnIndexOfPlayer(args[0]);
+                        g = returnIndexOfPlayer(args[0].toLocaleLowerCase());
                         if(g != -1){
                             cand = playerList[g];
                             voter = playerList[returnIndexOfPlayer(userID)];
@@ -463,7 +485,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                 if(betweenRounds){
                     if(room1.leaderID == userID){
                         for(var i = 0; i < playerList.length; i++){
-                            if(playerList[i].playerName == args[0] && playerList[i].userID != room1.leaderID){
+                            if(playerList[i].playerName == args[0].toLocaleLowerCase() && playerList[i].userID != room1.leaderID){
                                 if(room1.members.has(playerList[i].userID)){
                                     room1sent = playerList[i]
                                 }
@@ -472,7 +494,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     }
                     else if(room2.leaderID == userID){
                         for(var i = 0; i < playerList.length; i++){
-                            if(playerList[i].playerName == args[0] && playerList[i].userID != room1.leaderID){
+                            if(playerList[i].playerName == args[0].toLocaleLowerCase() && playerList[i].userID != room1.leaderID){
                                 if(room2.members.has(playerList[i].userID)){
                                     room2sent = playerList[i]
                                 }
@@ -496,6 +518,8 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     room2.members.add(room1sent.userID)
                     sendToChannel(room2.roomID, room2.leaderID);
                     sendToChannel(room1.roomID, room1.leaderID);
+                    room2.members.add(room2.leaderID);
+                    room1.members.add(room1.leaderID);
                     room1sent = null;
                     room2sent = null;
                     betweenRounds = false;
@@ -526,7 +550,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     if(isSet){
                         if(bot.channels[channelID] != undefined){
                             sendToChannel(meetingRoom.roomID, userID);
-                            var newPlayer = new Player(userID, (bot.servers[bot.channels[channelID].guild_id].members[userID].nick != null ? bot.servers[bot.channels[channelID].guild_id].members[userID].nick : user));
+                            var newPlayer = new Player(userID, (bot.servers[bot.channels[channelID].guild_id].members[userID].nick != null ? bot.servers[bot.channels[channelID].guild_id].members[userID].nick : user).toLocaleLowerCase());
                             if(!playerList.some(player => player.userID === newPlayer.userID)){
                                 playerList.push(newPlayer)
                             }
@@ -555,10 +579,13 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
                     sendMessage(channelID, 'Leaving mid-game is not allowed!');
                 }
             break;
+            //!list
             case 'list':
+                    let roleCall = '';
                     for(var i=0; i < playerList.length; i++){
-                        sendMessage(channelID, playerList[i].playerName);
+                        roleCall = String.prototype.concat(roleCall, playerList[i].playerName+ '\n');
                     }
+                    sendMessage(channelID, roleCall);
             break;
             // Just add any case commands if you want to..
          }
@@ -566,7 +593,7 @@ bot.on('message', function (user, userID, channelID, message, evt, ) {
 });
 
 function colors(sender, receiver, forced){
-    if(!sender.role.includes("ShyGuy") && !receiver.role.includes("ShyGuy") || forced){
+    if(!sender.role.includes("Shy") && !receiver.role.includes("Shy") || forced){
         sendMessage(receiver.userID, sender.playerName + ' is ' + stringColor(sender.team, sender.team));
     }
     else{
@@ -575,7 +602,7 @@ function colors(sender, receiver, forced){
 }
 
 function cards(sender, receiver, forced){
-    if(!sender.role.includes("ShyGuy") && !sender.role.includes('Coy') && !receiver.role.includes("ShyGuy") && !receiver.role.includes("Coy") || forced){
+    if(!sender.role.includes("Shy") && !sender.role.includes('Coy') && !receiver.role.includes("Shy") && !receiver.role.includes("Coy") || forced){
     sendMessage(receiver.userID, sender.playerName + ' is ' + stringColor(sender.team, sender.role));
     }
     else{
@@ -584,7 +611,7 @@ function cards(sender, receiver, forced){
 }
 
 function inSameRoom(player1, player2){
-    if((room1.members.has(player1) && room1.members.has(player2) || (room2.members.has(player1) && room2.members.has(player2)))){
+    if((room1.members.has(player1) && room1.members.has(player2)) || (room2.members.has(player1) && room2.members.has(player2)) || (meetingRoom.members.has(player1) && meetingRoom.members.has(player2))){
         return true;
     }
     else{
@@ -624,13 +651,16 @@ function cardSwap(player1, player2){
 
 function startRound(channelID){
     x = it.next();
-    q = 15000;
+    q = 60000;
     if(x.value == undefined){
-        sendMessage(channelID, "If you are the Gambler, Sniper, or Private Eye, please make your guess now. You have 10 seconds. Not guessing results in a loss");
-        setTimeout(endGame, 10000, channelID);
+        if(pause){
+            sendMessage(channelID, "If you are the Gambler, Sniper, or Private Eye, please make your guess now. You have 10 seconds. Not guessing results in a loss");
+            setTimeout(endGame, 10000, channelID);
+        }
     }
     else{
-        sendMessage(channelID, "This round will be " + x.value + " minutes long.");
+        roundCt++;
+        sendMessage(channelID, "This is round " + roundCt + ". There are " + (roundTimers.length - roundCt) + " rounds left. This round will be " + x.value + " minutes long.");
         setTimeout(function(){ if(active){bot.sendMessage({to:channelID, message: '1 minute left in the round', tts: true})}}, (x.value - 1)  *  q);
         setTimeout(function(){ if(active){bot.sendMessage({to:channelID, message: '30 seconds left in the round', tts: true})}}, (x.value - 0.5)  * q);
         setTimeout(endRound, x.value * q, channelID);
@@ -639,11 +669,21 @@ function startRound(channelID){
 
 function endRound(channelID){
     sendMessage(channelID, "This round is over ");
-    sendToChannel(meetingRoom.roomID, (room2.leaderID != null ? room2.leaderID : (Array.from(room2.members))[0]));
-    sendToChannel(meetingRoom.roomID, (room1.leaderID != null ? room1.leaderID : (Array.from(room1.members))[0]));
+    if(room1.leaderID == null){
+        room1.leaderID = (Array.from(room1.members))[0];
+    }
+    if(room2.leaderID == null){
+        room2.leaderID = (Array.from(room2.members))[0];
+    }
+    sendToChannel(meetingRoom.roomID, room2.leaderID);
+    sendToChannel(meetingRoom.roomID, room1.leaderID);
+    meetingRoom.members.add(room1.leaderID);
+    meetingRoom.members.add(room2.leaderID);
+    room1.members.delete(room1.leaderID);
+    room2.members.delete(room2.leaderID);
     for(var l = 0; l < playerList.length; l++){
         playerList[l].votes = 0;
-        playerList[l].prevVote = null;
+        playerList[l].vote = null;
     }
     betweenRounds = true;
 }
@@ -706,6 +746,7 @@ function endGame(channelID){
             room2.leaderID = null;
             active = false;
             betweenRounds = false;
+            pause = false;
             for(let o = 0; o < playerList.length; o++){
                 sendToChannel(meetingRoom.roomID, playerList[o].userID);
             }
